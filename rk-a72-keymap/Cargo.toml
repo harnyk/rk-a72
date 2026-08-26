@@ -1,0 +1,21 @@
+[package]
+name = "rk-a72-keymap"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Protocol codec and device session library for the wired RK A72 keyboard"
+repository = "https://github.com/harnyk/rk-a72"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+thiserror = "1"
+hidapi = { version = "2", default-features = false, features = ["linux-native-basic-udev"] }
+bitflags = "2"
+hcl-rs = "0.19"
+csscolorparser = "0.8"
+indexmap = { version = "2", features = ["serde"] }
+
+[build-dependencies]
+serde_json = "1"

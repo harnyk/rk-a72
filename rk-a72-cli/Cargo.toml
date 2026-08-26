@@ -1,0 +1,15 @@
+[package]
+name = "rk-a72"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Command-line tool for reading and writing the keymap on a wired RK A72 keyboard"
+repository = "https://github.com/harnyk/rk-a72"
+
+[dependencies]
+rk-a72-keymap = { path = "../rk-a72-keymap" }
+clap = { version = "4", features = ["derive"] }
+clap_complete = { version = "4", features = ["unstable-dynamic"] }
+anyhow = "1"
+hidapi = { version = "2", default-features = false, features = ["linux-native-basic-udev"] }
+serde_yaml_ng = "0.10"
