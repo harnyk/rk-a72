@@ -15,20 +15,16 @@ cargo build --release -p rk-a72
 ## Usage
 
 ```sh
-rk-a72 export-keymap keymap.yaml           # keys that differ from factory default, layer 0 + Fn, to YAML
-rk-a72 export-keymap --full keymap.yaml    # every populated slot, not just the ones that differ
-rk-a72 import-keymap keymap.yaml           # merge a YAML keymap file onto factory default and apply
-
 rk-a72 export-hcl keymap.hcl               # keys that differ from factory default, as an HCL `layer` block
 rk-a72 export-hcl --full keymap.hcl        # every populated slot, not just the ones that differ
 rk-a72 import-hcl keymap.hcl               # merge an HCL config file (issue #2 schema) onto factory default and apply
 
 rk-a72 list-keys                           # reference: physical key names, KeyBoard symbols, modifiers
 
-rk-a72 get-keymap Esc                      # print the current mapping of one physical key
+rk-a72 get-keymap Esc                      # print the current mapping of one physical key, as an HCL `mapping` block
 rk-a72 get-keymap Esc --layer fn
 
-rk-a72 set-keymap Esc --symbol Grave       # set one key directly, without a YAML round-trip
+rk-a72 set-keymap Esc --symbol Grave       # set one key directly, without a config-file round-trip
 rk-a72 set-keymap A --symbol B --mod LCtrl+LShift
 rk-a72 set-keymap A --label Mute
 rk-a72 set-keymap A --raw 0x020000e2
@@ -46,8 +42,8 @@ names, malformed macros, out-of-range brightness, etc. all fail before any hardw
 touched. See [`keymap.example.hcl`](keymap.example.hcl) for a worked example.
 
 What actually gets **flashed** today is only the `layer` section, and within it only
-`key`(+`mods`) / `label` / `raw` actions — these map straight onto the same `SetKeyMatrix`
-write path `import-keymap` uses. Only the `normal` and `fn` layers exist on the A72.
+`key`(+`mods`) / `label` / `raw` actions — these map straight onto the `SetKeyMatrix`
+write path. Only the `normal` and `fn` layers exist on the A72.
 
 Each key is its own repeatable `mapping "<PhysicalKey>" { ... }` block, not a single object
 attribute — this is the v2 schema (issue #2), no backward compatibility with the earlier
@@ -95,7 +91,7 @@ no write path for them; `import-hcl` prints a note and skips each:
 Colours are still fully resolved during validation (theme aliases and CSS strings → RGB) and
 macro event sequences fully parsed, so the front-end is ready the moment those opcodes land.
 
-`export-keymap`/`import-keymap`/`export-hcl`/`import-hcl`/`get-keymap`/`set-keymap` YAML/HCL and CLI arguments are keyed
+`export-hcl`/`import-hcl`/`get-keymap`/`set-keymap` HCL and CLI arguments are keyed
 by physical key name (e.g. `Esc`, `M1`, `Mute`), not slot number — run `rk-a72 list-keys` to
 see every valid physical key name, `key` symbol, and `mod` name. Each physical key has
 `normal`/`fn` sub-entries for its un-Fn'd and Fn-held mappings.

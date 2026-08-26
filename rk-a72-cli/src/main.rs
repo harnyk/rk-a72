@@ -9,8 +9,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use clap_complete::CompleteEnv;
 use rk_a72_keymap::{
-    HclConfig, HclExporter, KeyMappingCodec, KeyMappingType, KeyMatrixRepository,
-    KeymapYamlSerializer, LedColorRepository, MacroRepository, ModifierSet, PhysicalKeyboardLayout,
+    factory_default_buffer, patch_buffer, HclConfig, HclExporter, KeyMappingCodec, KeyMappingType,
+    KeyMatrixRepository, LedColorRepository, MacroRepository, ModifierSet, PhysicalKeyboardLayout,
     WiredSession, SUPPORTED_PRODUCT_ID, SUPPORTED_VENDOR_ID,
 };
 use rk_a72_keymap::macros::{MacroActionKind, MacroEdge};
@@ -26,32 +26,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Read the KeyMatrix (layers 0/1/2 — Normal, Fn, Fn2) from a wired A72 and write it out
-    /// as YAML. By default only prints slots that differ from the factory default (the compact
-    /// form import-keymap round-trips onto); pass --full to dump every populated slot.
-    ExportKeymap {
-        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_supported_vid)]
-        vid: u16,
-        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_supported_pid)]
-        pid: u16,
-        /// Dump every populated slot, not just the ones that differ from factory default
-        #[arg(long)]
-        full: bool,
-        /// Output YAML file (default: stdout)
-        out: Option<String>,
-    },
-    /// Apply a YAML keymap file (from export-keymap) to a wired A72 — the
-    /// file is merged onto the factory-default KeyMatrix, so slots it doesn't mention
-    /// reset to factory rather than keeping whatever the device currently holds
-    ImportKeymap {
-        file: String,
-        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_supported_vid)]
-        vid: u16,
-        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_supported_pid)]
-        pid: u16,
-        #[arg(long)]
-        dry_run: bool,
-    },
     /// Read the KeyMatrix, macro table, and LED colors from a wired A72 and write
     /// them out as HCL (issue #2 schema) — `layer` blocks, `macro` blocks, and a `lighting.colors`
     /// block. There's no `theme` to round-trip since the device holds only resolved RGB, not named
@@ -94,9 +68,10 @@ enum Command {
         pid: u16,
     },
     /// Print every physical key name, KeyBoard key symbol, modifier name, and label
-    /// value usable in export-keymap/import-keymap YAML files
+    /// value usable in import-hcl/export-hcl config files
     ListKeys,
-    /// Print the current mapping of one physical key, without going through a YAML file
+    /// Print the current mapping of one physical key as an HCL `mapping` block, without
+    /// going through a config file
     GetKeymap {
         key: String,
         /// "normal", "fn" or "fn2"
@@ -108,7 +83,7 @@ enum Command {
         pid: u16,
     },
     /// Change the mapping of one physical key directly on the device, without going
-    /// through a YAML file. Give exactly one of --raw, --label, --symbol
+    /// through a config file. Give exactly one of --raw, --label, --symbol
     SetKeymap {
         key: String,
         /// "normal", "fn" or "fn2"
@@ -278,7 +253,7 @@ fn layer_from_arg(layer: &str) -> Result<u8> {
 }
 
 /// Encodes a set-keymap value from its CLI flags, in the same precedence order as the
-/// YAML format's raw/label/key+mod fields: --raw wins if given, then --label, then
+/// HCL config's raw/label/key+mod fields: --raw wins if given, then --label, then
 /// --symbol/--mod.
 fn encode_from_flags(
     codec: &KeyMappingCodec,
@@ -322,24 +297,12 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Command::ExportKeymap {
-            vid,
-            pid,
-            full,
-            out,
-        } => export_keymap(vid, pid, full, out),
         Command::ExportHcl {
             vid,
             pid,
             full,
             out,
         } => export_hcl(vid, pid, full, out),
-        Command::ImportKeymap {
-            file,
-            vid,
-            pid,
-            dry_run,
-        } => import_keymap(&file, vid, pid, dry_run),
         Command::ImportHcl {
             file,
             vid,
@@ -394,20 +357,13 @@ fn get_keymap(key: &str, layer: &str, vid: u16, pid: u16) -> Result<()> {
     );
     let session = WiredSession::open(&api, &device.path)?;
     let repo = KeyMatrixRepository::new(session);
-    let serializer =
-        KeymapYamlSerializer::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
+    let exporter = HclExporter::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
 
     let buffer = repo.read_layer(layer_num)?;
     let offset = slot as usize * 4;
     let value = u32::from_be_bytes(buffer[offset..offset + 4].try_into().unwrap());
 
-    let mut doc = serde_yaml_ng::Mapping::new();
-    doc.insert(key.into(), serializer.describe_slot(value));
-    println!(
-        "{}",
-        serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(doc))
-            .expect("serializing a Mapping never fails")
-    );
+    println!("{}", exporter.describe_slot(key, value, &[]));
     Ok(())
 }
 
@@ -499,46 +455,13 @@ fn set_keymap(
     Ok(())
 }
 
-fn export_keymap(vid: u16, pid: u16, full: bool, out: Option<String>) -> Result<()> {
-    let (api, device) = select_wired_device(vid, pid)?;
-    eprintln!(
-        "Connecting to {} [vid={vid:04x} pid={pid:04x}]",
-        device.product.as_deref().unwrap_or("(unknown product)")
-    );
-    let session = WiredSession::open(&api, &device.path)?;
-    let repo = KeyMatrixRepository::new(session);
-    let serializer =
-        KeymapYamlSerializer::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
-
-    let mut buffers_by_layer = HashMap::new();
-    for layer in [0u8, 1u8, 2u8] {
-        eprintln!("Reading layer {layer}…");
-        buffers_by_layer.insert(layer, repo.read_layer(layer)?);
-    }
-    let text = if full {
-        serializer.dump_yaml(&buffers_by_layer)
-    } else {
-        serializer.dump_yaml_diff(&buffers_by_layer)
-    };
-
-    match out {
-        Some(path) => {
-            fs::write(&path, text)?;
-            eprintln!("Wrote {path}");
-        }
-        None => println!("{text}"),
-    }
-    Ok(())
-}
-
 fn export_hcl(vid: u16, pid: u16, full: bool, out: Option<String>) -> Result<()> {
     let (api, device) = select_wired_device(vid, pid)?;
     eprintln!(
         "Connecting to {} [vid={vid:04x} pid={pid:04x}]",
         device.product.as_deref().unwrap_or("(unknown product)")
     );
-    let yaml_serializer =
-        KeymapYamlSerializer::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
+    let codec = KeyMappingCodec::new();
     let hcl_exporter = HclExporter::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
 
     // Each session is scoped to its own block and dropped before the next one opens —
@@ -568,7 +491,7 @@ fn export_hcl(vid: u16, pid: u16, full: bool, out: Option<String>) -> Result<()>
     } else {
         let baseline: HashMap<u8, Vec<u8>> = [0u8, 1u8, 2u8]
             .into_iter()
-            .map(|layer| (layer, yaml_serializer.factory_default_buffer(layer)))
+            .map(|layer| (layer, factory_default_buffer(&codec, layer)))
             .collect();
         hcl_exporter.dump_diff(&buffers_by_layer, &baseline, &macro_names)
     };
@@ -591,22 +514,6 @@ fn export_hcl(vid: u16, pid: u16, full: bool, out: Option<String>) -> Result<()>
         None => println!("{text}"),
     }
     Ok(())
-}
-
-fn import_keymap(file: &str, vid: u16, pid: u16, dry_run: bool) -> Result<()> {
-    let text = fs::read_to_string(file)?;
-    let serializer =
-        KeymapYamlSerializer::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
-    let slot_maps = serializer.parse_yaml(&text)?;
-
-    let (api, device) = select_wired_device(vid, pid)?;
-    eprintln!(
-        "Connecting to {} [vid={vid:04x} pid={pid:04x}]",
-        device.product.as_deref().unwrap_or("(unknown product)")
-    );
-    let session = WiredSession::open(&api, &device.path)?;
-    let repo = KeyMatrixRepository::new(session);
-    apply_slot_maps(&repo, &slot_maps, dry_run)
 }
 
 fn import_hcl(file: &str, vid: u16, pid: u16, dry_run: bool) -> Result<()> {
@@ -703,12 +610,12 @@ fn apply_lighting(repo: &LedColorRepository, config: &HclConfig, dry_run: bool) 
     Ok(())
 }
 
-/// Merge the per-layer `{slot -> value}` maps produced by either the YAML or HCL
-/// front-end onto the factory-default KeyMatrix and write the result to the device,
+/// Merge the per-layer `{slot -> value}` maps produced by the HCL front-end onto the
+/// factory-default KeyMatrix and write the result to the device,
 /// printing a per-key before/after diff (against what the device currently holds)
 /// and a summary.
 ///
-/// The merge base is the embedded factory-default dump, not the device's current
+/// The merge base is the built-in factory default, not the device's current
 /// state: slots the config doesn't mention are reset to factory rather than left
 /// however a previous import happened to leave them, so imports are reproducible
 /// from the config alone instead of depending on prior device state.
@@ -719,8 +626,6 @@ fn apply_slot_maps(
 ) -> Result<()> {
     let codec = KeyMappingCodec::new();
     let layout = PhysicalKeyboardLayout::new();
-    let serializer =
-        KeymapYamlSerializer::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
 
     let mut changed = 0u32;
     let mut unchanged = 0u32;
@@ -731,8 +636,8 @@ fn apply_slot_maps(
 
         eprintln!("Reading layer {layer}…");
         let current = repo.read_layer(layer)?;
-        let mut target = serializer.factory_default_buffer(layer);
-        serializer.patch_buffer(&mut target, slot_map);
+        let mut target = factory_default_buffer(&codec, layer);
+        patch_buffer(&mut target, slot_map);
 
         // Compares decoded labels (not raw values) to match the Node CLI exactly — a raw-only
         // change invisible in the label (e.g. a Macro's repeat count) is still written even
@@ -862,8 +767,8 @@ mod tests {
     fn cli_parses_defaults_and_rejects_overrides() {
         use clap::Parser;
 
-        assert!(Cli::try_parse_from(["rk-a72", "export-keymap"]).is_ok());
-        assert!(Cli::try_parse_from(["rk-a72", "export-keymap", "--pid", "005e"]).is_err());
-        assert!(Cli::try_parse_from(["rk-a72", "export-keymap", "--vid", "1234"]).is_err());
+        assert!(Cli::try_parse_from(["rk-a72", "export-hcl"]).is_ok());
+        assert!(Cli::try_parse_from(["rk-a72", "export-hcl", "--pid", "005e"]).is_err());
+        assert!(Cli::try_parse_from(["rk-a72", "export-hcl", "--vid", "1234"]).is_err());
     }
 }

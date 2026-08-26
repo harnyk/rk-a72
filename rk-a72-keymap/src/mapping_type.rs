@@ -129,9 +129,9 @@ mod tests {
 
     #[test]
     fn type_name_preserves_the_json_mousue_typo_for_mouse() {
-        // Existing/future keymap.yaml files say `type: Mousue` for mouse-button
-        // entries (a typo baked into the original site's code) — must not "fix" this,
-        // or old and new YAML files stop being interchangeable.
+        // The original site's data spells the mouse-button type "Mousue" (a typo baked
+        // into its code) — `list-keys` and the label tables surface that name verbatim,
+        // so "fixing" it here would break parity with that reference data.
         assert_eq!(KeyMappingType::Mouse.type_name(), "Mousue");
         assert_eq!(KeyMappingType::DpiKey.type_name(), "DPIKey");
         assert_eq!(KeyMappingType::SpecialFun.type_name(), "SpecialFun");

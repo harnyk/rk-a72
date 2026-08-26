@@ -1,24 +1,26 @@
 pub mod codec;
 pub mod error;
+pub mod factory_default;
 pub mod hcl;
 pub mod layout;
 pub mod macros;
 pub mod mapping_type;
 pub mod modifiers;
+pub mod physical_key;
 pub mod protocol;
 pub mod repository;
 pub mod session;
 pub mod visual;
-pub mod yaml;
 
 pub use codec::{DecodedMapping, KeyMappingCodec};
 pub use error::KeymapError;
+pub use factory_default::{factory_default_buffer, factory_default_slot_maps, patch_buffer};
 pub use hcl::{HclConfig, HclExporter, KeyColor, LayerAction, LightingConfig, MacroDef, MacroEvent, MacroKey};
 pub use layout::PhysicalKeyboardLayout;
 pub use macros::{decode_macro_table, encode_macro_table, Macro, MacroAction, MacroActionKind, MacroEdge, MACRO_BUFFER_LEN, MACRO_PAGE_LEN};
 pub use mapping_type::KeyMappingType;
 pub use modifiers::ModifierSet;
+pub use physical_key::PhysicalKey;
 pub use protocol::{SUPPORTED_PRODUCT_ID, SUPPORTED_VENDOR_ID};
 pub use repository::{KeyMatrixRepository, LedColorRepository, MacroRepository};
 pub use session::{find_wired_device, DeviceMatch, WiredSession};
-pub use yaml::KeymapYamlSerializer;

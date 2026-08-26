@@ -2,7 +2,8 @@
 //!
 //! This module parses the HCL schema proposed in issue #2 (theme / macro / layer /
 //! lighting) into fully-validated Rust structs and compiles the parts the core can
-//! actually flash into the same per-layer slot maps [`crate::yaml`] produces.
+//! actually flash into the same per-layer `{layer -> {slot -> value}}` slot maps the
+//! KeyMatrix write path consumes.
 //!
 //! ## What compiles to device bytecode today
 //!
@@ -362,8 +363,8 @@ impl HclConfig {
     }
 
     /// Compile the `layer` section to the per-layer `{slot -> value}` maps the
-    /// KeyMatrix write path consumes — the same shape [`crate::yaml::KeymapYamlSerializer::parse_yaml`]
-    /// returns, so the CLI import loop is identical. A `macro = "name"` layer action
+    /// KeyMatrix write path consumes — the `{layer -> {slot -> value}}` shape the CLI
+    /// import loop applies to the device. A `macro = "name"` layer action
     /// resolves via [`Self::encode_macro_reference`] instead of
     /// [`LayerAction::to_slot_value`], since it needs the macro's table index rather
     /// than just its own fields.
@@ -703,9 +704,8 @@ fn hcl_doc_header(codec: &KeyMappingCodec, layout: &PhysicalKeyboardLayout) -> S
 
 /// Renders one KeyMatrix slot value as the ordered attribute lines for an HCL `mapping`
 /// block body — e.g. `["key = \"Esc\""]` or `["mods = [\"LCtrl\"]", "key = \"C\""]` —
-/// mirroring the key/mod-vs-label-vs-raw precedence [`crate::yaml::KeymapYamlSerializer`]
-/// uses when dumping the same slot to YAML, so the two front-ends never disagree about
-/// which form best represents a given raw value.
+/// following key/mod-vs-label-vs-raw precedence: a resolvable macro/label is preferred
+/// over a bare `raw` hex value whenever there's enough information to name it.
 fn slot_to_hcl_attrs(codec: &KeyMappingCodec, raw: u32, decoded: &crate::codec::DecodedMapping) -> Vec<String> {
     if let crate::codec::DecodedMapping::KeyBoard {
         key_code,
@@ -768,9 +768,8 @@ impl HclExporter {
     }
 
     /// Dumps only slots whose raw value differs from `baseline` — the compact export
-    /// form, mirroring [`crate::yaml::KeymapYamlSerializer::dump_yaml_diff`]. Compares
-    /// raw bytes, not decoded labels, so a difference invisible in the label (e.g. a
-    /// Macro's repeat count) is still surfaced.
+    /// form. Compares raw bytes, not decoded labels, so a difference invisible in the
+    /// label (e.g. a Macro's repeat count) is still surfaced.
     pub fn dump_diff(
         &self,
         buffers_by_layer: &HashMap<u8, Vec<u8>>,
@@ -778,6 +777,21 @@ impl HclExporter {
         macro_names: &[String],
     ) -> String {
         self.dump_impl(buffers_by_layer, Some(baseline), macro_names)
+    }
+
+    /// Renders a single slot's current mapping as one `mapping "<Name>" { <attrs> }`
+    /// block — the shape `import-hcl` round-trips — for callers (e.g. `get-keymap`) that
+    /// want to show one key without producing a whole document. `macro_names` resolves a
+    /// macro-index slot to `macro = "<name>"` when the name is known.
+    pub fn describe_slot(&self, name: &str, raw: u32, macro_names: &[String]) -> String {
+        let decoded = self.codec.decode(raw, Some(macro_names));
+        let attrs = slot_to_hcl_attrs(&self.codec, raw, &decoded);
+        let mut block = format!("mapping \"{}\" {{\n", hcl_escape(name));
+        for attr in &attrs {
+            block.push_str(&format!("  {attr}\n"));
+        }
+        block.push('}');
+        block
     }
 
     /// Renders a `lighting { colors = {...} } ` block from a raw 378-byte planar
@@ -1199,7 +1213,7 @@ fn resolve_action(
     macros: &IndexMap<String, RawMacro>,
     codec: &KeyMappingCodec,
 ) -> Result<LayerAction, KeymapError> {
-    // Precedence mirrors the YAML/CLI path: raw > label > macro > key. Exactly one form
+    // Precedence: raw > label > macro > key. Exactly one form
     // must be present.
     let forms = [
         action.raw.is_some(),

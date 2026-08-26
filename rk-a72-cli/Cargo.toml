@@ -12,4 +12,3 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 anyhow = "1"
 hidapi = { version = "2", default-features = false, features = ["linux-native-basic-udev"] }
-serde_yaml_ng = "0.10"

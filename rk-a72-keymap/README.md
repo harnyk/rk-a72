@@ -21,23 +21,27 @@ implemented here).
 - **`codec`** — `KeyMappingCodec`, `DecodedMapping`: converts between the raw 32-bit mapping
   value on the wire and a structured form (KeyBoard symbol + modifiers, non-KeyBoard label,
   macro, or raw passthrough).
-- **`layout`** — `PhysicalKeyboardLayout`: maps physical key names (`Esc`, `M1`, ...) to
-  matrix slot numbers, from `data/physical_key_labels.json`.
+- **`physical_key`** — `PhysicalKey`: the compile-time enum of named physical keys and the
+  single source of truth for each key's matrix slot and canonical name.
+- **`layout`** — `PhysicalKeyboardLayout`: the string-keyed view over `PhysicalKey` that
+  resolves user-supplied key names (`Esc`, `M1`, ...) to matrix slots.
 - **`modifiers`** — `ModifierSet`: the `LCtrl+LShift`-style modifier name parsing/formatting.
 - **`mapping_type`** — `KeyMappingType`: the type-byte discriminant (KeyBoard/Label/Macro/
   Custom/...) embedded in each raw mapping value.
 - **`visual`** — display-only overrides for renamed symbolic names (see
   `data/visual_overrides.json`): some symbolic names were renamed for shell-safety, and
   this keeps the original glyph visible.
-- **`yaml`** — `KeymapYamlSerializer`: the on-disk YAML format used by
-  `rk-a72 export-keymap`/`import-keymap`.
+- **`factory_default`** — the built-in factory-default KeyMatrix, expressed as a semantic
+  Rust table (physical key + layer + action) and resolved through the codec. It's the merge
+  base every import resets un-mentioned slots to, and depends on no on-disk config format.
+- **`hcl`** — `HclConfig`, `HclExporter`: HCL is the only text config format, parsed/emitted
+  by `rk-a72 import-hcl`/`export-hcl`.
 
 ## Data files (`data/`)
 
 Static tables loaded at build/run time, not meant to be hand-edited without understanding
 their source:
 
-- `physical_key_labels.json` — matrix slot → physical key name.
 - `key_mapping_table.json` — raw mapping value → label(s); `build.rs` validates at compile
   time that every non-KeyBoard/Macro/Custom label is unique (panics on ambiguity).
 - `hid_keycode_table.json` — KeyBoard usage code → symbol name, plus non-US keycode/physical

@@ -24,11 +24,10 @@ The A72 uses USB vendor ID `0x258a` and is built on a SinoWealth SH68F90A-family
 
 ## Layout
 
-A Cargo workspace with three crates:
+A Cargo workspace with two crates:
 
 - [`rk-a72-keymap`](rk-a72-keymap/) — protocol codec and device session library.
 - [`rk-a72-cli`](rk-a72-cli/) — the `rk-a72` command-line tool built on it.
-- [`rk-a72-gui`](rk-a72-gui/) — an egui-based graphical editor.
 
 See each crate's own README for build/usage instructions.
 
