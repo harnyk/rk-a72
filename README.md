@@ -30,7 +30,8 @@ A Cargo workspace with two crates:
 - [`rk-a72-keymap`](rk-a72-keymap/) — protocol codec and device session library.
 - [`rk-a72-cli`](rk-a72-cli/) — the `rk-a72` command-line tool built on it.
 
-See each crate's own README for build/usage instructions.
+See each crate's own README for build/usage instructions, and [`docs/protocol/`](docs/protocol/)
+for a byte-level breakdown of the wire protocol itself.
 
 ## Quick start
 
