@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use rk_a72_keymap::{patch_buffer, KeyMatrixRepository, LedColorRepository, KEYMATRIX_BUFFER_LEN};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotState {
@@ -70,6 +71,59 @@ impl AppState {
     /// Used to decide whether Save has anything to do.
     pub fn any_dirty(&self) -> bool {
         self.working_keymap != self.device_keymap || self.working_led != self.device_led
+    }
+
+    /// Layer numbers (0/1/2) that have at least one keymap slot dirty, in ascending order.
+    pub fn dirty_layers(&self) -> Vec<u8> {
+        let mut layers: Vec<u8> = self
+            .working_keymap
+            .keys()
+            .filter(|&&layer| {
+                let working = self.working_keymap.get(&layer).cloned().unwrap_or_default();
+                let device = self.device_keymap.get(&layer).cloned().unwrap_or_default();
+                working != device
+            })
+            .copied()
+            .collect();
+        layers.sort_unstable();
+        layers
+    }
+
+    /// The full KEYMATRIX_BUFFER_LEN-byte buffer for one layer, built from
+    /// `working_keymap[layer]` — every slot that layer's working map mentions is patched
+    /// in; every other slot is zeroed, matching a freshly reset device's layout.
+    pub fn build_layer_buffer(&self, layer: u8) -> Vec<u8> {
+        let mut buffer = vec![0u8; KEYMATRIX_BUFFER_LEN];
+        if let Some(slot_map) = self.working_keymap.get(&layer) {
+            patch_buffer(&mut buffer, slot_map);
+        }
+        buffer
+    }
+
+    /// Writes every dirty keymap layer and, if any LED slot is dirty, the LED color
+    /// buffer, to the device. On success, `device_keymap`/`device_led` become clones of
+    /// the just-written `working_*` (clearing all dirty flags). On failure, `working_*` is
+    /// left untouched so no in-progress edit is lost, and the error is returned for the
+    /// caller to display — dirty flags remain so the caller can retry.
+    pub fn save(
+        &mut self,
+        keymap_repo: &KeyMatrixRepository,
+        led_repo: &LedColorRepository,
+    ) -> hidapi::HidResult<()> {
+        for layer in self.dirty_layers() {
+            let buffer = self.build_layer_buffer(layer);
+            keymap_repo.write_layer(layer, &buffer)?;
+        }
+
+        let led_dirty = (0..self.working_led.len() / 3).any(|slot| self.led_slot_dirty(slot as u16));
+        if led_dirty {
+            led_repo.enter_self_define()?;
+            led_repo.write_colors(&self.working_led)?;
+        }
+
+        self.device_keymap = self.working_keymap.clone();
+        self.device_led = self.working_led.clone();
+        Ok(())
     }
 }
 
@@ -170,5 +224,55 @@ mod tests {
         let mut state = AppState::new(HashMap::new(), led, HashMap::new());
         state.working_led[0] = 99;
         assert!(state.any_dirty());
+    }
+
+    #[test]
+    fn dirty_layers_lists_only_layers_with_at_least_one_dirty_slot() {
+        let device_keymap = map(&[(0, 7, 0xAA), (1, 8, 0xBB)]);
+        let mut state = AppState::new(device_keymap, vec![], HashMap::new());
+        state.working_keymap.get_mut(&0).unwrap().insert(7, 0xCC); // layer 0 dirty
+        // layer 1 untouched
+        assert_eq!(state.dirty_layers(), vec![0]);
+    }
+
+    #[test]
+    fn dirty_layers_is_empty_when_nothing_changed() {
+        let device_keymap = map(&[(0, 7, 0xAA)]);
+        let state = AppState::new(device_keymap, vec![], HashMap::new());
+        assert!(state.dirty_layers().is_empty());
+    }
+
+    #[test]
+    fn build_layer_buffer_patches_working_slots_onto_a_zeroed_buffer() {
+        use rk_a72_keymap::KEYMATRIX_BUFFER_LEN;
+        let device_keymap = map(&[(0, 7, 0xAABBCCDD)]);
+        let state = AppState::new(device_keymap, vec![], HashMap::new());
+        let buf = state.build_layer_buffer(0);
+        assert_eq!(buf.len(), KEYMATRIX_BUFFER_LEN);
+        let slot_offset = 7 * 4;
+        assert_eq!(&buf[slot_offset..slot_offset + 4], &[0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn build_layer_buffer_leaves_unmentioned_slots_zeroed() {
+        use rk_a72_keymap::KEYMATRIX_BUFFER_LEN;
+        let device_keymap = map(&[(0, 7, 0xAABBCCDD)]);
+        let state = AppState::new(device_keymap, vec![], HashMap::new());
+        let buf = state.build_layer_buffer(0);
+        assert_eq!(buf.len(), KEYMATRIX_BUFFER_LEN);
+        let other_offset = 8 * 4;
+        assert_eq!(&buf[other_offset..other_offset + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn build_layer_buffer_reflects_working_not_device_state() {
+        use rk_a72_keymap::KEYMATRIX_BUFFER_LEN;
+        let device_keymap = map(&[(0, 7, 0xAABBCCDD)]);
+        let mut state = AppState::new(device_keymap, vec![], HashMap::new());
+        state.working_keymap.get_mut(&0).unwrap().insert(7, 0x11223344);
+        let buf = state.build_layer_buffer(0);
+        assert_eq!(buf.len(), KEYMATRIX_BUFFER_LEN);
+        let slot_offset = 7 * 4;
+        assert_eq!(&buf[slot_offset..slot_offset + 4], &[0x11, 0x22, 0x33, 0x44]);
     }
 }
