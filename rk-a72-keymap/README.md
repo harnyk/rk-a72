@@ -21,19 +21,21 @@ implemented here).
 - **`codec`** — `KeyMappingCodec`, `DecodedMapping`: converts between the raw 32-bit mapping
   value on the wire and a structured form (KeyBoard symbol + modifiers, non-KeyBoard label,
   macro, or raw passthrough).
-- **`physical_key`** — `PhysicalKey`: the compile-time enum of named physical keys and the
-  single source of truth for each key's matrix slot and canonical name.
-- **`layout`** — `PhysicalKeyboardLayout`: the string-keyed view over `PhysicalKey` that
-  resolves user-supplied key names (`Esc`, `M1`, ...) to matrix slots.
+- **`model`** — `KeyboardModel`, `MODELS`: each supported device as data — its USB ids,
+  named physical keys (slot ↔ name), and semantic factory-default table (key + layer +
+  action, resolved through the codec). This is the single source of truth for per-device
+  facts and the merge base every import resets un-mentioned slots to; it depends on no
+  on-disk config format. Adding a same-protocol device is a new `KeyboardModel` const.
+  Selected by vid/pid via `KeyboardModel::for_ids`.
+- **`layout`** — `PhysicalKeyboardLayout`: the string-keyed view over a model's key set that
+  resolves user-supplied key names (`Esc`, `M1`, ...) to matrix slots, adding the `slotN`
+  fallback and display-only visual overrides.
 - **`modifiers`** — `ModifierSet`: the `LCtrl+LShift`-style modifier name parsing/formatting.
 - **`mapping_type`** — `KeyMappingType`: the type-byte discriminant (KeyBoard/Label/Macro/
   Custom/...) embedded in each raw mapping value.
 - **`visual`** — display-only overrides for renamed symbolic names (see
   `data/visual_overrides.json`): some symbolic names were renamed for shell-safety, and
   this keeps the original glyph visible.
-- **`factory_default`** — the built-in factory-default KeyMatrix, expressed as a semantic
-  Rust table (physical key + layer + action) and resolved through the codec. It's the merge
-  base every import resets un-mentioned slots to, and depends on no on-disk config format.
 - **`hcl`** — `HclConfig`, `HclExporter`: HCL is the only text config format, parsed/emitted
   by `rk-a72 import-hcl`/`export-hcl`.
 

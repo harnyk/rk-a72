@@ -9,9 +9,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use clap_complete::CompleteEnv;
 use rk_a72_keymap::{
-    factory_default_buffer, patch_buffer, HclConfig, HclExporter, KeyMappingCodec, KeyMappingType,
-    KeyMatrixRepository, LedColorRepository, MacroRepository, ModifierSet, PhysicalKeyboardLayout,
-    WiredSession, SUPPORTED_PRODUCT_ID, SUPPORTED_VENDOR_ID,
+    patch_buffer, HclConfig, HclExporter, KeyMappingCodec, KeyMappingType, KeyMatrixRepository,
+    KeyboardModel, LedColorRepository, MacroRepository, ModifierSet, PhysicalKeyboardLayout,
+    WiredSession,
 };
 use rk_a72_keymap::macros::{MacroActionKind, MacroEdge};
 
@@ -33,9 +33,9 @@ enum Command {
     /// --full to dump every populated slot (macros and lighting are always dumped in full, since
     /// there's no factory baseline to diff them against).
     ExportHcl {
-        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_supported_vid)]
+        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_hex_u16)]
         vid: u16,
-        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_supported_pid)]
+        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_hex_u16)]
         pid: u16,
         /// Dump every populated slot, not just the ones that differ from factory default
         #[arg(long)]
@@ -52,9 +52,9 @@ enum Command {
     /// device has no concept of named colors, only resolved RGB.
     ImportHcl {
         file: String,
-        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_supported_vid)]
+        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_hex_u16)]
         vid: u16,
-        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_supported_pid)]
+        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_hex_u16)]
         pid: u16,
         #[arg(long)]
         dry_run: bool,
@@ -62,9 +62,9 @@ enum Command {
     /// Read the macro table from a wired A72 and print each macro's
     /// name and decoded action sequence. Read-only — does not write anything.
     GetMacros {
-        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_supported_vid)]
+        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_hex_u16)]
         vid: u16,
-        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_supported_pid)]
+        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_hex_u16)]
         pid: u16,
     },
     /// Print every physical key name, KeyBoard key symbol, modifier name, and label
@@ -77,9 +77,9 @@ enum Command {
         /// "normal", "fn" or "fn2"
         #[arg(long, default_value = "normal", value_parser = ["normal", "fn", "fn2"])]
         layer: String,
-        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_supported_vid)]
+        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_hex_u16)]
         vid: u16,
-        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_supported_pid)]
+        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_hex_u16)]
         pid: u16,
     },
     /// Change the mapping of one physical key directly on the device, without going
@@ -103,15 +103,15 @@ enum Command {
         raw: Option<String>,
         #[arg(long)]
         dry_run: bool,
-        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_supported_vid)]
+        #[arg(long, default_value = DEFAULT_VID, value_parser = parse_hex_u16)]
         vid: u16,
-        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_supported_pid)]
+        #[arg(long, default_value = DEFAULT_PID, value_parser = parse_hex_u16)]
         pid: u16,
     },
 }
 
-/// Textual defaults for `--vid`/`--pid`. Kept in sync with the library constants by
-/// `defaults_match_supported_ids` below.
+/// Textual defaults for `--vid`/`--pid` (the RK A72). Checked to resolve to a real model by
+/// `defaults_resolve_to_a_known_model` below.
 const DEFAULT_VID: &str = "258a";
 const DEFAULT_PID: &str = "0216";
 
@@ -119,33 +119,22 @@ fn parse_hex_u16(s: &str) -> Result<u16, String> {
     u16::from_str_radix(s, 16).map_err(|e| e.to_string())
 }
 
-/// `--vid`/`--pid` exist so the IDs are visible and scriptable, but only the wired A72's
-/// own IDs are accepted: every byte layout this tool writes was verified against that one
-/// device, so pointing it at another keyboard would flash guessed data. See
-/// `SUPPORTED_VENDOR_ID` in `rk-a72-keymap` for the reasoning.
-fn parse_supported_vid(s: &str) -> Result<u16, String> {
-    let vid = parse_hex_u16(s)?;
-    if vid == SUPPORTED_VENDOR_ID {
-        Ok(vid)
-    } else {
-        Err(format!(
-            "unsupported vendor id {vid:04x} — rk-a72 only supports the wired RK A72 \
-             (vid={SUPPORTED_VENDOR_ID:04x} pid={SUPPORTED_PRODUCT_ID:04x})"
-        ))
-    }
-}
-
-/// See [`parse_supported_vid`].
-fn parse_supported_pid(s: &str) -> Result<u16, String> {
-    let pid = parse_hex_u16(s)?;
-    if pid == SUPPORTED_PRODUCT_ID {
-        Ok(pid)
-    } else {
-        Err(format!(
-            "unsupported product id {pid:04x} — rk-a72 only supports the wired RK A72 \
-             (vid={SUPPORTED_VENDOR_ID:04x} pid={SUPPORTED_PRODUCT_ID:04x})"
-        ))
-    }
+/// Resolves the `--vid`/`--pid` pair to a known keyboard model, or errors. Only devices
+/// with a registered model are accepted: every byte layout this tool writes was verified
+/// against a specific device, so pointing it at an unknown keyboard would flash guessed
+/// data. Adding support for a new device is a new `KeyboardModel` in `rk-a72-keymap`, after
+/// which its IDs resolve here automatically.
+fn resolve_model(vid: u16, pid: u16) -> Result<&'static KeyboardModel> {
+    KeyboardModel::for_ids(vid, pid).ok_or_else(|| {
+        let known = rk_a72_keymap::MODELS
+            .iter()
+            .map(|m| format!("{} ({:04x}:{:04x})", m.name, m.vid, m.pid))
+            .collect::<Vec<_>>()
+            .join(", ");
+        anyhow::anyhow!(
+            "no keyboard model known for vid={vid:04x} pid={pid:04x} — supported: {known}"
+        )
+    })
 }
 
 /// Builds a completion candidate from a canonical name, attaching the old glyph as
@@ -342,7 +331,8 @@ fn main() -> Result<()> {
 }
 
 fn get_keymap(key: &str, layer: &str, vid: u16, pid: u16) -> Result<()> {
-    let layout = PhysicalKeyboardLayout::new();
+    let model = resolve_model(vid, pid)?;
+    let layout = model.layout();
     let slot = layout.slot_for_name(key).ok_or_else(|| {
         anyhow::anyhow!(
             "Unknown physical key name \"{key}\" — run \"list-keys\" to see valid names."
@@ -357,7 +347,7 @@ fn get_keymap(key: &str, layer: &str, vid: u16, pid: u16) -> Result<()> {
     );
     let session = WiredSession::open(&api, &device.path)?;
     let repo = KeyMatrixRepository::new(session);
-    let exporter = HclExporter::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
+    let exporter = HclExporter::new(model.codec(), model.layout());
 
     let buffer = repo.read_layer(layer_num)?;
     let offset = slot as usize * 4;
@@ -368,6 +358,7 @@ fn get_keymap(key: &str, layer: &str, vid: u16, pid: u16) -> Result<()> {
 }
 
 fn get_macros(vid: u16, pid: u16) -> Result<()> {
+    let model = resolve_model(vid, pid)?;
     let (api, device) = select_wired_device(vid, pid)?;
     eprintln!(
         "Connecting to {} [vid={vid:04x} pid={pid:04x}]",
@@ -384,7 +375,7 @@ fn get_macros(vid: u16, pid: u16) -> Result<()> {
         return Ok(());
     }
 
-    let codec = KeyMappingCodec::new();
+    let codec = model.codec();
     for (i, m) in macros.iter().enumerate() {
         println!("[{i}] \"{}\" ({} action(s)):", m.name, m.actions.len());
         for action in &m.actions {
@@ -419,8 +410,9 @@ fn set_keymap(
     vid: u16,
     pid: u16,
 ) -> Result<()> {
-    let layout = PhysicalKeyboardLayout::new();
-    let codec = KeyMappingCodec::new();
+    let model = resolve_model(vid, pid)?;
+    let layout = model.layout();
+    let codec = model.codec();
     let slot = layout.slot_for_name(key).ok_or_else(|| {
         anyhow::anyhow!(
             "Unknown physical key name \"{key}\" — run \"list-keys\" to see valid names."
@@ -456,13 +448,14 @@ fn set_keymap(
 }
 
 fn export_hcl(vid: u16, pid: u16, full: bool, out: Option<String>) -> Result<()> {
+    let model = resolve_model(vid, pid)?;
     let (api, device) = select_wired_device(vid, pid)?;
     eprintln!(
         "Connecting to {} [vid={vid:04x} pid={pid:04x}]",
         device.product.as_deref().unwrap_or("(unknown product)")
     );
-    let codec = KeyMappingCodec::new();
-    let hcl_exporter = HclExporter::new(KeyMappingCodec::new(), PhysicalKeyboardLayout::new());
+    let codec = model.codec();
+    let hcl_exporter = HclExporter::new(model.codec(), model.layout());
 
     // Each session is scoped to its own block and dropped before the next one opens —
     // macOS's IOHIDDeviceOpen is exclusive by default and errors
@@ -491,7 +484,7 @@ fn export_hcl(vid: u16, pid: u16, full: bool, out: Option<String>) -> Result<()>
     } else {
         let baseline: HashMap<u8, Vec<u8>> = [0u8, 1u8, 2u8]
             .into_iter()
-            .map(|layer| (layer, factory_default_buffer(&codec, layer)))
+            .map(|layer| (layer, model.factory_buffer(&codec, layer)))
             .collect();
         hcl_exporter.dump_diff(&buffers_by_layer, &baseline, &macro_names)
     };
@@ -517,10 +510,12 @@ fn export_hcl(vid: u16, pid: u16, full: bool, out: Option<String>) -> Result<()>
 }
 
 fn import_hcl(file: &str, vid: u16, pid: u16, dry_run: bool) -> Result<()> {
+    let model = resolve_model(vid, pid)?;
     let text = fs::read_to_string(file)?;
-    // Parse and fully validate the whole document up front — bad colors, unknown keys or
-    // malformed macros fail here, before touching any hardware.
-    let config = HclConfig::parse(&text)?;
+    // Parse and fully validate the whole document up front, resolving key names against the
+    // selected model — bad colors, unknown keys or malformed macros fail here, before
+    // touching any hardware.
+    let config = HclConfig::parse_with(&text, &model.codec(), &model.layout())?;
 
     let slot_maps = config.layer_slot_maps()?;
     let has_layers = !slot_maps.values().all(|m| m.is_empty());
@@ -555,7 +550,7 @@ fn import_hcl(file: &str, vid: u16, pid: u16, dry_run: bool) -> Result<()> {
     if has_layers {
         let session = WiredSession::open(&api, &device.path)?;
         let repo = KeyMatrixRepository::new(session);
-        apply_slot_maps(&repo, &slot_maps, dry_run)?;
+        apply_slot_maps(model, &repo, &slot_maps, dry_run)?;
     }
 
     if has_lighting {
@@ -620,12 +615,13 @@ fn apply_lighting(repo: &LedColorRepository, config: &HclConfig, dry_run: bool) 
 /// however a previous import happened to leave them, so imports are reproducible
 /// from the config alone instead of depending on prior device state.
 fn apply_slot_maps(
+    model: &KeyboardModel,
     repo: &KeyMatrixRepository,
     slot_maps: &HashMap<u8, HashMap<u16, u32>>,
     dry_run: bool,
 ) -> Result<()> {
-    let codec = KeyMappingCodec::new();
-    let layout = PhysicalKeyboardLayout::new();
+    let codec = model.codec();
+    let layout = model.layout();
 
     let mut changed = 0u32;
     let mut unchanged = 0u32;
@@ -636,7 +632,7 @@ fn apply_slot_maps(
 
         eprintln!("Reading layer {layer}…");
         let current = repo.read_layer(layer)?;
-        let mut target = factory_default_buffer(&codec, layer);
+        let mut target = model.factory_buffer(&codec, layer);
         patch_buffer(&mut target, slot_map);
 
         // Compares decoded labels (not raw values) to match the Node CLI exactly — a raw-only
@@ -749,26 +745,28 @@ fn list_keys() -> Result<()> {
 mod tests {
     use super::*;
 
-    /// The clap defaults are string literals; this pins them to the library constants so
-    /// changing one without the other can't ship a default the parser itself rejects.
+    /// The clap `--vid`/`--pid` defaults are string literals; this pins them to a real
+    /// registered model so a typo can't ship a default that resolves to no device.
     #[test]
-    fn defaults_match_supported_ids() {
-        assert_eq!(parse_supported_vid(DEFAULT_VID), Ok(SUPPORTED_VENDOR_ID));
-        assert_eq!(parse_supported_pid(DEFAULT_PID), Ok(SUPPORTED_PRODUCT_ID));
+    fn defaults_resolve_to_a_known_model() {
+        let vid = parse_hex_u16(DEFAULT_VID).unwrap();
+        let pid = parse_hex_u16(DEFAULT_PID).unwrap();
+        assert!(resolve_model(vid, pid).is_ok());
     }
 
     #[test]
-    fn rejects_other_devices() {
-        assert!(parse_supported_vid("1234").is_err());
-        assert!(parse_supported_pid("005e").is_err());
+    fn resolve_model_rejects_unknown_ids() {
+        assert!(resolve_model(0x1234, 0x005e).is_err());
     }
 
+    /// vid/pid are now plain hex at the clap layer — any value parses; an unsupported
+    /// device is rejected at runtime by `resolve_model`, not by the argument parser.
     #[test]
-    fn cli_parses_defaults_and_rejects_overrides() {
+    fn cli_parses_defaults_and_any_hex_ids() {
         use clap::Parser;
 
         assert!(Cli::try_parse_from(["rk-a72", "export-hcl"]).is_ok());
-        assert!(Cli::try_parse_from(["rk-a72", "export-hcl", "--pid", "005e"]).is_err());
-        assert!(Cli::try_parse_from(["rk-a72", "export-hcl", "--vid", "1234"]).is_err());
+        assert!(Cli::try_parse_from(["rk-a72", "export-hcl", "--pid", "005e"]).is_ok());
+        assert!(Cli::try_parse_from(["rk-a72", "export-hcl", "--vid", "zzzz"]).is_err()); // not hex
     }
 }

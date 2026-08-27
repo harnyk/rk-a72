@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::physical_key::PhysicalKey;
+use crate::model::KeyboardModel;
 
 pub struct PhysicalKeyboardLayout {
     name_by_slot: HashMap<u16, String>,
@@ -11,13 +11,14 @@ pub struct PhysicalKeyboardLayout {
 impl PhysicalKeyboardLayout {
     pub const KEYMATRIX_SLOT_COUNT: u16 = crate::protocol::KEYMATRIX_SLOT_COUNT as u16;
 
-    pub fn new() -> Self {
-        // Names and slots come from the `PhysicalKey` enum — the single source of truth —
-        // rather than a JSON data file; these maps are just the string-keyed views the
-        // rest of the code (HCL parsing, `list-keys`, etc.) resolves user input through.
-        let name_by_slot: HashMap<u16, String> = PhysicalKey::ALL
-            .into_iter()
-            .map(|key| (key.slot(), key.name().to_string()))
+    /// The string-resolver view over one model's key set: the name<->slot maps the rest of
+    /// the code (HCL parsing, `list-keys`, completion) resolves user input through, plus
+    /// the `slotN` fallback and display-only visual overrides. The model is the data
+    /// source of truth; this is just its string-keyed projection.
+    pub fn for_model(model: &KeyboardModel) -> Self {
+        let name_by_slot: HashMap<u16, String> = model
+            .named_keys()
+            .map(|(slot, name)| (slot, name.to_string()))
             .collect();
         let slot_by_name = name_by_slot
             .iter()
@@ -28,6 +29,12 @@ impl PhysicalKeyboardLayout {
             slot_by_name,
             visual: crate::visual::VisualOverrides::new(),
         }
+    }
+
+    /// The layout for the default model — used where no device context selects one
+    /// (shell completion, tests).
+    pub fn new() -> Self {
+        Self::for_model(KeyboardModel::default_model())
     }
 
     pub fn name_for_slot(&self, slot: u16) -> String {
@@ -86,7 +93,7 @@ mod tests {
     #[test]
     fn m_cluster_names_are_reversed_from_slot_index_order() {
         // Confirmed by physically pressing the keycaps (bottom keycap "M1" sends
-        // Ctrl+Z, which is slot 5's value) — see the `PhysicalKey` enum.
+        // Ctrl+Z, which is slot 5's value) — see the model's key table.
         let layout = PhysicalKeyboardLayout::new();
         assert_eq!(layout.name_for_slot(1), "M5");
         assert_eq!(layout.name_for_slot(5), "M1");
@@ -132,7 +139,7 @@ mod tests {
         );
         for (&id, visual_glyph) in &layout.visual.physical {
             let canonical = layout.name_by_slot.get(&(id as u16)).unwrap_or_else(|| {
-                panic!("physical override id {id} has no matching PhysicalKey slot")
+                panic!("physical override id {id} has no matching key slot in the model")
             });
             assert_ne!(
                 canonical, visual_glyph,
