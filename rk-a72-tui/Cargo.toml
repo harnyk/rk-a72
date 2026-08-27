@@ -1,0 +1,18 @@
+[package]
+name = "rk-a72-tui"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Interactive terminal UI for the wired RK A72 keyboard"
+repository = "https://github.com/harnyk/rk-a72"
+
+[[bin]]
+name = "rk-a72-tui"
+path = "src/main.rs"
+
+[dependencies]
+rk-a72-keymap = { path = "../rk-a72-keymap" }
+ratatui = "0.29"
+crossterm = "0.28"
+anyhow = "1"
+hidapi = { version = "2", default-features = false, features = ["linux-native-basic-udev"] }

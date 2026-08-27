@@ -19,6 +19,6 @@ pub use macros::{decode_macro_table, encode_macro_table, Macro, MacroAction, Mac
 pub use mapping_type::KeyMappingType;
 pub use model::{patch_buffer, KeyboardModel, Layer, MODELS};
 pub use modifiers::ModifierSet;
-pub use protocol::{SUPPORTED_PRODUCT_ID, SUPPORTED_VENDOR_ID};
+pub use protocol::{KEYMATRIX_BUFFER_LEN, LED_COLORS_SLOT_COUNT, SUPPORTED_PRODUCT_ID, SUPPORTED_VENDOR_ID};
 pub use repository::{KeyMatrixRepository, LedColorRepository, MacroRepository};
 pub use session::{find_wired_device, DeviceMatch, WiredSession};
