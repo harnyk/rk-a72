@@ -1,5 +1,7 @@
 use std::collections::HashMap;
-use rk_a72_keymap::{patch_buffer, KeyMatrixRepository, LedColorRepository, KEYMATRIX_BUFFER_LEN};
+use rk_a72_keymap::{
+    patch_buffer, KeyMatrixRepository, LedColorRepository, KEYMATRIX_BUFFER_LEN, LED_COLORS_SLOT_COUNT,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotState {
@@ -56,11 +58,10 @@ impl AppState {
     /// Whether one LED slot's color differs between working and device state. LED has no
     /// factory baseline to diff against, unlike keymap.
     pub fn led_slot_dirty(&self, slot: u16) -> bool {
-        let led_colors_slot_count = self.device_led.len() / 3;
         let (r_off, g_off, b_off) = (
             slot as usize,
-            slot as usize + led_colors_slot_count,
-            slot as usize + led_colors_slot_count * 2,
+            slot as usize + LED_COLORS_SLOT_COUNT,
+            slot as usize + LED_COLORS_SLOT_COUNT * 2,
         );
         self.working_led.get(r_off) != self.device_led.get(r_off)
             || self.working_led.get(g_off) != self.device_led.get(g_off)
@@ -68,7 +69,9 @@ impl AppState {
     }
 
     /// Whether anything at all — any keymap slot on any layer, or any LED slot — is dirty.
-    /// Used to decide whether Save has anything to do.
+    /// Used to decide whether Save has anything to do. Not yet called from the UI/event
+    /// loop — wired up when the action-edit dialog (and its Save-gating) is implemented.
+    #[allow(dead_code)]
     pub fn any_dirty(&self) -> bool {
         self.working_keymap != self.device_keymap || self.working_led != self.device_led
     }
@@ -115,7 +118,7 @@ impl AppState {
             keymap_repo.write_layer(layer, &buffer)?;
         }
 
-        let led_dirty = (0..self.working_led.len() / 3).any(|slot| self.led_slot_dirty(slot as u16));
+        let led_dirty = (0..LED_COLORS_SLOT_COUNT as u16).any(|slot| self.led_slot_dirty(slot));
         if led_dirty {
             led_repo.enter_self_define()?;
             led_repo.write_colors(&self.working_led)?;
@@ -186,8 +189,8 @@ mod tests {
 
     #[test]
     fn led_slot_unedited_is_not_dirty() {
-        // 2 slots: R[2] G[2] B[2]
-        let led = vec![10, 20, 30, 40, 50, 60];
+        // Full-size LED buffer: LED_COLORS_SLOT_COUNT slots, R plane then G plane then B plane.
+        let led = vec![7u8; LED_COLORS_SLOT_COUNT * 3];
         let state = AppState::new(HashMap::new(), led, HashMap::new());
         assert!(!state.led_slot_dirty(0));
         assert!(!state.led_slot_dirty(1));
@@ -195,7 +198,7 @@ mod tests {
 
     #[test]
     fn led_slot_edited_is_dirty() {
-        let led = vec![10, 20, 30, 40, 50, 60];
+        let led = vec![7u8; LED_COLORS_SLOT_COUNT * 3];
         let mut state = AppState::new(HashMap::new(), led, HashMap::new());
         state.working_led[0] = 99; // R of slot 0
         assert!(state.led_slot_dirty(0));
@@ -274,5 +277,60 @@ mod tests {
         assert_eq!(buf.len(), KEYMATRIX_BUFFER_LEN);
         let slot_offset = 7 * 4;
         assert_eq!(&buf[slot_offset..slot_offset + 4], &[0x11, 0x22, 0x33, 0x44]);
+    }
+
+    /// Proves the coupling between main.rs's read path (which drops zero-valued slots
+    /// when building `device_keymap`/`working_keymap`) and `build_layer_buffer`'s
+    /// zero-based patching: given a full KEYMATRIX_BUFFER_LEN-byte "device" buffer with a
+    /// mix of zero and non-zero slots, building a sparse slot map the same way main.rs
+    /// does (drop zero entries) and then calling `build_layer_buffer` on an AppState
+    /// built from that sparse map must reproduce the original full buffer byte-for-byte.
+    /// If a future change makes either side stop matching this assumption (e.g. the read
+    /// path starts keeping zero entries, or `build_layer_buffer` stops zero-basing), this
+    /// test catches it.
+    #[test]
+    fn build_layer_buffer_round_trips_a_sparse_slot_map_correctly() {
+        use rk_a72_keymap::KEYMATRIX_BUFFER_LEN;
+
+        // A full device buffer: mostly zero (empty matrix positions), with several
+        // populated slots scattered across the buffer, including near the start, middle,
+        // and end, and including one slot whose value happens to be zero (which must NOT
+        // appear in the sparse map, exactly like main.rs's read path).
+        let mut device_buffer = vec![0u8; KEYMATRIX_BUFFER_LEN];
+        let populated: &[(usize, u32)] = &[
+            (0, 0x0004_0006),   // slot 0: first slot in the buffer
+            (7, 0xAABBCCDD),
+            (42, 0x1122_3344),
+            (100, 0x0000_0001),
+            (125, 0xFFFF_FFFF), // last slot (KEYMATRIX_BUFFER_LEN / 4 == 126)
+        ];
+        for &(slot, value) in populated {
+            let offset = slot * 4;
+            device_buffer[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+        // Slot 50 explicitly stays zero, and is NOT inserted into the sparse map below —
+        // this is the case that would break silently if build_layer_buffer patched onto
+        // something other than an all-zero base.
+
+        // Build the sparse slot map exactly the way main.rs's read path does: decode each
+        // 4-byte chunk, keep only non-zero values.
+        let mut slot_map = HashMap::new();
+        for (slot, chunk) in device_buffer.chunks_exact(4).enumerate() {
+            let value = u32::from_be_bytes(chunk.try_into().unwrap());
+            if value != 0 {
+                slot_map.insert(slot as u16, value);
+            }
+        }
+        // Sanity check: the sparse map really is sparse (doesn't just happen to list
+        // every slot), otherwise this test wouldn't be exercising the zero-base coupling.
+        assert_eq!(slot_map.len(), populated.len());
+
+        let mut device_keymap = HashMap::new();
+        device_keymap.insert(0u8, slot_map);
+        let state = AppState::new(device_keymap, vec![], HashMap::new());
+
+        let rebuilt = state.build_layer_buffer(0);
+        assert_eq!(rebuilt.len(), KEYMATRIX_BUFFER_LEN);
+        assert_eq!(rebuilt, device_buffer, "build_layer_buffer must reproduce the full device buffer from a sparse (zero-dropped) slot map");
     }
 }

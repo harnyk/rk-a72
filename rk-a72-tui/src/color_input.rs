@@ -1,3 +1,8 @@
+// ColorInput is not yet wired into any UI dialog — the interactive color-edit widget is
+// future work (see main.rs's module doc comment). Kept `#[allow(dead_code)]` rather than
+// silently ignored so it's clear this is expected, not an oversight.
+#![allow(dead_code)]
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorChannel {
     R,

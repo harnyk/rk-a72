@@ -44,6 +44,6 @@ pub fn key_box_area(col: u16, row: u16, w: u16, h: u16, origin: Rect) -> Rect {
     }
 }
 
-pub fn status_line(text: &str) -> Paragraph {
+pub fn status_line(text: &str) -> Paragraph<'_> {
     Paragraph::new(Span::raw(text))
 }

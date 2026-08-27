@@ -12,8 +12,7 @@ use super::key_box_area;
 
 fn led_rgb(app: &AppState, slot: u16) -> (u8, u8, u8) {
     let count = app.working_led.len() / 3;
-    let (i, r_off, g_off, b_off) = (slot as usize, slot as usize, slot as usize + count, slot as usize + count * 2);
-    let _ = i;
+    let (r_off, g_off, b_off) = (slot as usize, slot as usize + count, slot as usize + count * 2);
     (
         app.working_led.get(r_off).copied().unwrap_or(0),
         app.working_led.get(g_off).copied().unwrap_or(0),
@@ -23,8 +22,8 @@ fn led_rgb(app: &AppState, slot: u16) -> (u8, u8, u8) {
 
 pub fn render(frame: &mut Frame, area: Rect, app: &AppState, ui: &UiState) {
     for geo in A72_GEOMETRY {
-        let box_area = key_box_area(geo.col, geo.row, geo.w, geo.h, area);
-        if box_area.x >= area.x + area.width || box_area.y >= area.y + area.height {
+        let box_area = key_box_area(geo.col, geo.row, geo.w, geo.h, area).intersection(area);
+        if box_area.is_empty() {
             continue;
         }
 

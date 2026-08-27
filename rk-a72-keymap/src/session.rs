@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use std::rc::Rc;
 use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice, HidResult};
@@ -11,8 +12,15 @@ use crate::protocol::{
 /// Thin wrapper over one open `hidapi` device for the BeiYing wired feature-report
 /// protocol: plain synchronous request/response over
 /// send_feature_report()/get_feature_report() — no fragmentation, no events to wait on.
+///
+/// `device` is `Rc`-wrapped so a single opened handle can back more than one repository
+/// (e.g. `KeyMatrixRepository` and `LedColorRepository` in a long-lived caller like the
+/// TUI) via `WiredSession::clone()`, without ever calling `open_path` twice for the same
+/// device — on macOS, `IOHIDDeviceOpen` is exclusive and a second concurrent open of the
+/// same path fails (see `rk-a72-cli`'s scoped-session comment for the same constraint).
+#[derive(Clone)]
 pub struct WiredSession {
-    device: HidDevice,
+    device: Rc<HidDevice>,
     delay: Duration,
 }
 
@@ -20,7 +28,7 @@ impl WiredSession {
     pub fn open(api: &HidApi, path: &std::ffi::CStr) -> HidResult<Self> {
         let device = api.open_path(path)?;
         Ok(Self {
-            device,
+            device: Rc::new(device),
             delay: Duration::from_millis(150),
         })
     }

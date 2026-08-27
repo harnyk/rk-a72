@@ -10,6 +10,10 @@ use crate::state::{AppState, SlotState};
 
 use super::key_box_area;
 
+// ActionKind/ActionDialogState are not yet reachable from any key handler — the
+// action-edit dialog itself is future work (see main.rs's module doc comment). Kept
+// `#[allow(dead_code)]` rather than silently ignored so it's clear this is expected.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionKind {
     Key,
@@ -20,6 +24,7 @@ pub enum ActionKind {
 /// Editable field state for the action-edit modal, opened when the user presses Enter on
 /// a selected key. Holds one buffer per action kind so switching tabs inside the dialog
 /// doesn't lose what was typed on another tab.
+#[allow(dead_code)]
 pub struct ActionDialogState {
     pub selected_tab: ActionKind,
     pub key_symbol: String,
@@ -28,6 +33,7 @@ pub struct ActionDialogState {
     pub raw_hex: String,
 }
 
+#[allow(dead_code)]
 impl ActionDialogState {
     pub fn new() -> Self {
         Self {
@@ -66,9 +72,9 @@ fn state_color(state: SlotState) -> Color {
 
 pub fn render(frame: &mut Frame, area: Rect, app: &AppState, ui: &UiState) {
     for geo in A72_GEOMETRY {
-        let box_area = key_box_area(geo.col, geo.row, geo.w, geo.h, area);
-        if box_area.x >= area.x + area.width || box_area.y >= area.y + area.height {
-            continue; // off-screen, skip rather than let ratatui panic on an invalid Rect
+        let box_area = key_box_area(geo.col, geo.row, geo.w, geo.h, area).intersection(area);
+        if box_area.is_empty() {
+            continue; // off-screen (or clipped to nothing), skip rather than let ratatui panic
         }
 
         // Slot lookup: geometry only carries names; resolving a name to its KeyMatrix
@@ -76,7 +82,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, ui: &UiState) {
         // (see rk-a72-keymap::layout) — the caller (Task 9's event loop / main.rs) is
         // expected to pass a resolved slot map alongside AppState in the fuller
         // integration; for rendering, slot_state is looked up the same way.
-        let slot = crate::geometry::slot_for(geo.name).unwrap_or(0);
+        let Some(slot) = crate::geometry::slot_for(geo.name) else { continue };
         let slot_state = app.keymap_slot_state(ui.layer.as_u8(), slot);
         let selected = geo.name == ui.selected_key;
 
