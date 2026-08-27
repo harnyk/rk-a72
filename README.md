@@ -2,7 +2,7 @@
 
 Tools for talking to the wired Royal Kludge A72 keyboard directly over raw HID —
 reading/writing the keymap, LED colors, macros, and other on-device settings without the
-vendor's Windows-only software.
+vendor's browser-based software.
 
 > [!WARNING]
 > **Use at your own risk.** This software talks to your keyboard's firmware over an
@@ -13,14 +13,15 @@ vendor's Windows-only software.
 > resulting from its use. See [LICENSE](LICENSE).
 
 **Supported device: the wired RK A72 (`258a:0216`) only.** Every byte layout here was
-worked out and verified against that one keyboard. Other RK models speak the same "BeiYing"
-protocol family and might work, but none have been tested, so the tools refuse to talk to
-anything else rather than writing guessed data to your keyboard — `--vid`/`--pid` exist but
-only accept the A72's own IDs. If you have another model and want to help widen that, open
-an issue.
+worked out and verified against that one keyboard. Other RK models speak the same protocol
+family and might work, but none have been tested, so the tools refuse to talk to anything
+else rather than writing guessed data to your keyboard — `--vid`/`--pid` exist but only
+accept the A72's own IDs. If you have another model and want to help widen that, open an
+issue.
 
-The A72 uses USB vendor ID `0x258a` and is built on a SinoWealth SH68F90A-family chip
-(marketed as BYK916).
+The A72 uses USB vendor ID `0x258a` and is believed to be built on a SinoWealth
+SH68F90A-family chip (marketed as BYK916) — see [Protocol background](#protocol-background)
+below.
 
 ## Layout
 
@@ -47,10 +48,10 @@ macOS, etc).
 
 ## Protocol background
 
-RK's official configurator communicates with the keyboard using a protocol RK's own code
-calls "BeiYing" — one of several protocol families RK uses across its lineup (others
-include SparkLink, JuPeng, QiWang, Gcome, HangSheng, RongYuan). Only BeiYing is
-implemented here, and only as the A72 speaks it.
+RK's official configurator communicates with the keyboard using one of several protocol
+families RK uses across its lineup (others include SparkLink, JuPeng, QiWang, Gcome,
+HangSheng, RongYuan). Only the A72's own protocol family is implemented here, and only as
+the A72 speaks it.
 
 The USB vendor ID (`0x258a`) used by the A72 is registered to
 **Sino Wealth Electronic Ltd.** — confirmed both by that registration and by the A72's own

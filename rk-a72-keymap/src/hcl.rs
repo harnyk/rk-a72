@@ -498,6 +498,13 @@ fn wrap_comment_list(items: &[String], width: usize) -> String {
 /// physical key name, KeyBoard symbol, modifier name, and label) needed to hand-edit
 /// the file or extend it without cross-referencing `list-keys` or the README. Written
 /// as `#`-comments so it's inert HCL and safe to leave in place on re-import.
+///
+/// The reference lists are parameterized by `codec`/`layout` and so follow whichever
+/// model produced them, but the prose around them (three layers Normal/Fn/Fn2, "fn2 has
+/// no factory mappings", the `raw = "0x02000192"` example) is a literal string describing
+/// today's only model, `RK_A72` — it doesn't ask `codec`/`layout` anything. A second
+/// `KeyboardModel` with a different layer set would need this text parameterized too,
+/// not just the lists.
 fn hcl_doc_header(codec: &KeyMappingCodec, layout: &PhysicalKeyboardLayout) -> String {
     let physical_keys: Vec<String> = layout.list_named().into_iter().map(|(name, ..)| name).collect();
     let key_symbols: Vec<String> = codec
