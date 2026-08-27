@@ -100,22 +100,35 @@ in one pass, since both ultimately go through the same `WiredSession`.
 
 ### Geometry
 
-A72-specific key geometry (per-key column/row position and box width in terminal cells)
-lives **locally in `rk-a72-tui`**, not in `rk-a72-keymap::model`. It's a UI concern, not a
-protocol or device fact — `KeyboardModel` stays free of anything visual, consistent with how
-`model.rs` already separates protocol facts (`protocol.rs`) from per-device facts
-(`model.rs`) from string-projection (`layout.rs`). A geometry table looks like:
+A72-specific key geometry (per-key position and size) lives **locally in `rk-a72-tui`**, not
+in `rk-a72-keymap::model`. It's a UI concern, not a protocol or device fact —
+`KeyboardModel` stays free of anything visual, consistent with how `model.rs` already
+separates protocol facts (`protocol.rs`) from per-device facts (`model.rs`) from
+string-projection (`layout.rs`).
+
+Coordinates are authored in a fine grid — one unit = 1/4 of a standard key's width/height —
+fine enough to place row stagger and the A72's Alice-style split accurately (confirmed via a
+visual mockup pass; a coarse 1-cell-per-key grid couldn't represent either). A geometry
+table looks like:
 
 ```rust
-struct KeyGeometry { name: &'static str, col: u16, row: u16, width: u16 }
+struct KeyGeometry { name: &'static str, col: u16, row: u16, w: u16, h: u16 } // col/row/w/h in grid units (1 unit = 1/4 key)
 static A72_GEOMETRY: &[KeyGeometry] = &[ /* one entry per named key in A72_KEYS */ ];
 ```
 
 Every name in this table must resolve against the connected `KeyboardModel`'s key set (a
 mismatch is a bug to catch in a test, mirroring how `model.rs` already tests its own
-slot/name tables for consistency) — but the table itself, its authoring, and its values are
-out of scope for this design; laying out ~81 named keys into a coherent ANSI-ish grid is
-implementation work, not an architectural decision.
+slot/name tables for consistency).
+
+**Authored via `tools/layout-editor.html`** — a standalone, self-contained HTML page (no
+build step, opens via `file://`) checked into the repo as a permanent internal tool, not a
+one-off script. It renders the fine-unit grid, lets the A72's ~81 named keys be
+drag-and-dropped onto it, selected and moved with arrow keys, resized with Shift+arrow keys,
+autosaves progress to the browser's `localStorage` (so authoring can span multiple sessions
+on the same machine), and has a "Copy Rust code" button that generates the
+`A72_GEOMETRY` table literal and copies it to the clipboard for pasting into
+`rk-a72-tui`'s source. The actual coordinate values are authored through this tool, not
+decided in this document — see [Open questions](#open-questions-for-the-implementation-plan-not-architectural).
 
 ### Key box rendering
 
@@ -208,8 +221,9 @@ check:
 ## Open questions for the implementation plan (not architectural)
 
 - Exact keybindings beyond what's specified above (Save, layer switch, dialog confirm/cancel).
-- The ~81-entry A72 geometry table's actual column/row/width values (visual layout
-  authoring, not a design decision).
-- Whether the digit-row 5-wide boxes shown in the visual check need narrowing for the A72's
-  full ~15-column widest row to fit comfortably in an 80-column terminal, or whether a
-  minimum terminal width is simply documented as a requirement.
+- The ~81-entry `A72_GEOMETRY` table's actual coordinate values — authored separately via
+  `tools/layout-editor.html` (see Geometry above) and pasted in once ready; not decided in
+  this document.
+- Whether the full A72 layout at its widest row needs narrowing to fit comfortably in an
+  80-column terminal, or whether a minimum terminal width is simply documented as a
+  requirement.
