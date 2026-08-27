@@ -1,25 +1,25 @@
 use std::collections::HashMap;
 
+use crate::model::KeyboardModel;
+
 pub struct PhysicalKeyboardLayout {
     name_by_slot: HashMap<u16, String>,
     slot_by_name: HashMap<String, u16>,
     visual: crate::visual::VisualOverrides,
 }
 
-fn parse_physical_key_labels(json: &str) -> HashMap<u16, String> {
-    let raw: HashMap<String, String> =
-        serde_json::from_str(json).expect("physical_key_labels.json must be valid JSON");
-    raw.into_iter()
-        .filter_map(|(k, v)| k.parse::<u16>().ok().map(|slot| (slot, v)))
-        .collect()
-}
-
 impl PhysicalKeyboardLayout {
     pub const KEYMATRIX_SLOT_COUNT: u16 = crate::protocol::KEYMATRIX_SLOT_COUNT as u16;
 
-    pub fn new() -> Self {
-        let name_by_slot =
-            parse_physical_key_labels(include_str!("../data/physical_key_labels.json"));
+    /// The string-resolver view over one model's key set: the name<->slot maps the rest of
+    /// the code (HCL parsing, `list-keys`, completion) resolves user input through, plus
+    /// the `slotN` fallback and display-only visual overrides. The model is the data
+    /// source of truth; this is just its string-keyed projection.
+    pub fn for_model(model: &KeyboardModel) -> Self {
+        let name_by_slot: HashMap<u16, String> = model
+            .named_keys()
+            .map(|(slot, name)| (slot, name.to_string()))
+            .collect();
         let slot_by_name = name_by_slot
             .iter()
             .map(|(&slot, name)| (name.clone(), slot))
@@ -29,6 +29,12 @@ impl PhysicalKeyboardLayout {
             slot_by_name,
             visual: crate::visual::VisualOverrides::new(),
         }
+    }
+
+    /// The layout for the default model — used where no device context selects one
+    /// (shell completion, tests).
+    pub fn new() -> Self {
+        Self::for_model(KeyboardModel::default_model())
     }
 
     pub fn name_for_slot(&self, slot: u16) -> String {
@@ -72,7 +78,7 @@ mod tests {
     fn name_for_slot_resolves_known_and_fallback_names() {
         let layout = PhysicalKeyboardLayout::new();
         assert_eq!(layout.name_for_slot(7), "Esc");
-        assert_eq!(layout.name_for_slot(0), "slot0"); // slot 0 has no entry in physical_key_labels.json
+        assert_eq!(layout.name_for_slot(0), "slot0"); // slot 0 is not a named PhysicalKey
     }
 
     #[test]
@@ -87,7 +93,7 @@ mod tests {
     #[test]
     fn m_cluster_names_are_reversed_from_slot_index_order() {
         // Confirmed by physically pressing the keycaps (bottom keycap "M1" sends
-        // Ctrl+Z, which is slot 5's value) — see physical_key_labels.json.
+        // Ctrl+Z, which is slot 5's value) — see the model's key table.
         let layout = PhysicalKeyboardLayout::new();
         assert_eq!(layout.name_for_slot(1), "M5");
         assert_eq!(layout.name_for_slot(5), "M1");
@@ -133,7 +139,7 @@ mod tests {
         );
         for (&id, visual_glyph) in &layout.visual.physical {
             let canonical = layout.name_by_slot.get(&(id as u16)).unwrap_or_else(|| {
-                panic!("physical override id {id} has no entry in physical_key_labels.json")
+                panic!("physical override id {id} has no matching key slot in the model")
             });
             assert_ne!(
                 canonical, visual_glyph,

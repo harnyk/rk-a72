@@ -9,7 +9,6 @@ repository = "https://github.com/harnyk/rk-a72"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml_ng = "0.10"
 thiserror = "1"
 hidapi = { version = "2", default-features = false, features = ["linux-native-basic-udev"] }
 bitflags = "2"

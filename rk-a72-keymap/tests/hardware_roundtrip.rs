@@ -114,8 +114,8 @@ fn keymap_round_trip_on_real_a72_hardware() {
     assert_eq!(
         restored, original,
         "FAILED TO RESTORE the original layer-{layer} keymap after the test — the keyboard \
-         may be left in the test's temporary state. Re-run export-keymap to check, and \
-         re-apply your real keymap.yaml with import-keymap if so."
+         may be left in the test's temporary state. Re-run export-hcl to check, and \
+         re-apply your real keymap.hcl with import-hcl if so."
     );
     println!("[e2e] restored and verified — layer {layer} matches the pre-test snapshot.");
 
