@@ -98,6 +98,18 @@ pub fn geometry_for(name: &str) -> Option<&'static KeyGeometry> {
     A72_GEOMETRY.iter().find(|g| g.name == name)
 }
 
+/// The KeyMatrix slot for a geometry key name, resolved against the default (only) A72
+/// model. `None` if the name isn't one of the model's named keys — shouldn't happen for
+/// any name actually in `A72_GEOMETRY` once its consistency tests pass, but callers get an
+/// `Option` rather than a panic since this crosses from "known at compile time" (the
+/// geometry table) to "known at runtime" (the model's key set) territory.
+pub fn slot_for(name: &str) -> Option<u16> {
+    rk_a72_keymap::KeyboardModel::default_model()
+        .named_keys()
+        .find(|(_, n)| *n == name)
+        .map(|(slot, _)| slot)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
