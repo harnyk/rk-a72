@@ -1,3 +1,4 @@
+mod color_input;
 mod geometry;
 mod state;
 
